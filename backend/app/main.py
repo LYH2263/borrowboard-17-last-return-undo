@@ -1,4 +1,5 @@
 from datetime import date, datetime, timezone
+from typing import Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -76,6 +77,57 @@ def return_loan(lid: int):
               (datetime.now(timezone.utc).isoformat(), lid))
     c.execute("UPDATE items SET status='available' WHERE id=?", (loan["item_id"],))
     c.commit(); c.close(); return {"ok": True}
+
+class UnreturnIn(BaseModel):
+    reason: str = ""
+    on_conflict: Literal["fail", "bump"] = "fail"
+
+@app.post("/api/loans/{lid}/unreturn")
+def unreturn_loan(lid: int, body: UnreturnIn):
+    reason = body.reason.strip() if isinstance(body.reason, str) else ""
+    if not reason:
+        raise HTTPException(400, "reason_required")
+    c = connect()
+    try:
+        loan = c.execute("SELECT * FROM loans WHERE id=?", (lid,)).fetchone()
+        if not loan: raise HTTPException(404, "loan")
+        if loan["status"] != "returned": raise HTTPException(400, "not_returned")
+        # 只能撤销“最近一次成功 returned”：之后不得再有任何归还（全局最近一笔）
+        newer = c.execute(
+            "SELECT id FROM loans WHERE status='returned' AND id>?", (lid,)
+        ).fetchone()
+        if newer: raise HTTPException(409, "not_latest_return")
+        iid = loan["item_id"]
+        item = c.execute("SELECT * FROM items WHERE id=?", (iid,)).fetchone()
+        active = c.execute(
+            "SELECT * FROM loans WHERE item_id=? AND status='active' ORDER BY id DESC",
+            (iid,)).fetchall()
+        conflict = len(active) > 0
+        if conflict and body.on_conflict == "fail":
+            # 整单失败保持现况：不改 items.status、不改 loan 行
+            raise HTTPException(409, "item_relent")
+        bumped_ids = []
+        if conflict:
+            # bump：挤掉归还后被别人借出的在借笔（单笔或并发遗留也一并收口）
+            for n in active:
+                c.execute(
+                    "UPDATE loans SET status='cancelled', unreturn_reason=?, rev_conflict='bumped' "
+                    "WHERE id=?",
+                    (f"撤销归还#{lid} 挤掉新借：{reason}", n["id"]))
+                bumped_ids.append(n["id"])
+            c.execute("UPDATE items SET status='on_loan' WHERE id=?", (iid,))
+        else:
+            # 无冲突：item 必须确为 available（逾期扫只判 loan 行，不写 items.status）
+            c.execute("UPDATE items SET status='on_loan' WHERE id=?", (iid,))
+        c.execute(
+            "UPDATE loans SET status='active', returned_at=NULL, unreturned_at=?, "
+            "unreturn_reason=?, rev_conflict=? WHERE id=?",
+            (datetime.now(timezone.utc).isoformat(), reason,
+             "bump" if conflict else None, lid))
+        c.commit()
+        return {"ok": True, "conflict": conflict, "bumped_loan_ids": bumped_ids}
+    finally:
+        c.close()
 
 @app.get("/api/loans")
 def loans():

@@ -1,5 +1,8 @@
 from app.db import connect
 
+def _columns(c, table: str) -> set[str]:
+    return {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
+
 def init_db():
     c = connect()
     c.executescript("""
@@ -8,10 +11,20 @@ def init_db():
     );
     CREATE TABLE IF NOT EXISTS loans(
       id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INT, borrower TEXT, status TEXT,
-      due_date TEXT, lent_at TEXT, returned_at TEXT
+      due_date TEXT, lent_at TEXT, returned_at TEXT,
+      unreturned_at TEXT, unreturn_reason TEXT, rev_conflict TEXT
     );
     CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
     """)
+    # 轻量迁移：既有库补撤销归还所需列
+    loan_cols = _columns(c, "loans")
+    for col, decl in (
+        ("unreturned_at", "TEXT"),
+        ("unreturn_reason", "TEXT"),
+        ("rev_conflict", "TEXT"),
+    ):
+        if col not in loan_cols:
+            c.execute(f"ALTER TABLE loans ADD COLUMN {col} {decl}")
     if c.execute("SELECT COUNT(*) c FROM items").fetchone()["c"] == 0:
         c.executemany("INSERT INTO items(title,owner,status,data_quality) VALUES (?,?,?,?)", [
             ("电钻", "老周", "available", "clean"),

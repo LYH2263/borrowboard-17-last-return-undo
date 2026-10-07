@@ -24,3 +24,9 @@ input { border: 1px solid var(--line); padding: 6px 8px; font: inherit; width: 1
 .topnav { display: flex; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .topnav a { color: inherit; }
 .muted { color: #5a5045; font-size: 13px; }
+.opt { display: inline-flex; align-items: center; gap: 4px; margin: 4px 12px 4px 0; font-size: 13px; }
+.opt input { width: auto; margin: 0; }
+.warn { margin: 6px 0; }
+.bumped { background: #efe4d2; }
+.ok { color: #2f5d34; margin-top: 8px; }
+.err { color: #8a2b1d; margin-top: 8px; }

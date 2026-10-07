@@ -13,13 +13,16 @@ def is_overdue(due_date: str, today: str, loan_status: str) -> bool:
     return bool(due_date) and due_date < today
 
 def classify_loans(loans: list[dict], today: str) -> dict:
-    active, overdue, returned = [], [], []
+    active, overdue, returned, cancelled = [], [], [], []
     for L in loans:
         st = L.get("status")
         if st == "returned":
             returned.append(L)
+        elif st == "cancelled":
+            # 撤销归还 bump 时被挤掉的新借笔
+            cancelled.append(L)
         elif is_overdue(L.get("due_date"), today, st):
             overdue.append({**L, "overdue": True})
         elif st == "active":
             active.append({**L, "overdue": False})
-    return {"active": active, "overdue": overdue, "returned": returned}
+    return {"active": active, "overdue": overdue, "returned": returned, "cancelled": cancelled}
